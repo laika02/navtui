@@ -24,6 +24,7 @@ This project was created with substantial generative AI assistance.
 - Live in-tab search/filter (`/`)
 - DNS fallback logic + DNS cache
 - Library snapshot cache to reduce startup latency
+- Background library warmup after startup/refresh to avoid hard UI stalls on first Albums/Songs access
 
 ## Platform Support
 
@@ -238,6 +239,9 @@ search_backspace = ["backspace"]
 - In Songs tab, `Right/Enter` plays selected song.
 - In Artists tab, `a`/`A` enqueues the selected artist's songs.
 - When queue is idle, first `a`/`A` enqueue also starts playback from the newly queued item.
+- After a hard refresh (or first run without a full snapshot), navtui warms albums/songs in the background.
+  - While warmup is still running, switching to Albums/Songs shows currently cached results immediately (no long UI freeze).
+  - Results continue filling as warmup progresses, and the finished snapshot is written to disk for faster next launch.
 - `n` inserts the selected item immediately after the currently playing queue entry.
 - In Queue Focus mode, `n` moves the selected queue song to play next.
 - Now Playing shows a timeline scrubber line under the volume slider using `POS elapsed |■■■□□□| total` style.

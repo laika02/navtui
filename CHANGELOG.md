@@ -23,6 +23,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - Timeline scrubber line in Now Playing with mouse seek support and seek hotkeys `;`/`'` (`-10s`/`+10s`).
 - MIT `LICENSE` file.
 - App-level regression tests for queue wrap/reorder cancel, search-mode hotkey/backspace behavior, and track-end retry/advance decision logic.
+- Background library warmup worker that incrementally fills album/song cache after startup and hard refresh.
 
 ### Changed
 
@@ -47,6 +48,8 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - Release workflow now installs MinGW on GitHub runners so Windows release artifacts can be built and attached.
 - Release workflow now supports manual `workflow_dispatch` with explicit tag input for recovery when tag-trigger runs are skipped.
 - CI/release workflows now install `pkg-config` and `libdbus-1-dev` on Ubuntu runners so `libdbus-sys` builds reliably.
+- Albums/songs full-cache fetch path now parallelizes Subsonic API fan-out requests for lower first-load latency.
+- During active background warmup, tab switching/filtering for global Albums/Songs uses cached data immediately to avoid long UI blocking.
 
 ## [0.1.0] - 2026-03-04
 
