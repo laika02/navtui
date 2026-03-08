@@ -61,14 +61,14 @@ jobs:
           if [[ -f "$NOTES_FILE" ]]; then
             cp "$NOTES_FILE" /tmp/release_notes.md
           else
-            cat > /tmp/release_notes.md <<EOF
-# navtui ${{ steps.meta.outputs.release_tag }}
-
-Automated release build from CI.
-
-This project was created with substantial generative AI assistance.
-See AI_TRANSPARENCY.MD for details.
-EOF
+            {
+              echo "# navtui ${{ steps.meta.outputs.release_tag }}"
+              echo
+              echo "Automated release build from CI."
+              echo
+              echo "This project was created with substantial generative AI assistance."
+              echo "See AI_TRANSPARENCY.MD for details."
+            } > /tmp/release_notes.md
           fi
 
       - name: Upload CI Artifacts
