@@ -22,7 +22,7 @@ Use this checklist before cutting a release tag.
 
 ## 3. Manual Smoke Test
 
-- Run: `cargo run`
+- Run: `navtui` (preferred) or `cargo run` in a source checkout
 - Verify login and keyring credential reuse.
 - Verify tab navigation and drill-down/back.
 - Verify search (`/`, typing, `Esc`, tab switch behavior).

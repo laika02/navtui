@@ -36,6 +36,10 @@ Completed:
 - CI (fmt/check/test/windows target check + Linux release build)
 - App-level regression tests for queue wrap/reorder cancel, search hotkey behavior, and track-end retry/advance decision logic
 
+Known caveat to disclose in release notes:
+
+- After hard refresh/cold cache, first load of each tab can be slow while the cache is populated.
+
 Remaining before final `v1.0.0`:
 
 - Add coverage for queue auto-advance integration path and playback failure pause behavior using a playback abstraction seam

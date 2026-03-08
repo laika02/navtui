@@ -56,6 +56,12 @@ b990fa5c864337787252fa37c0df35b1bca9089ede8b1315e6698a74d454d848  linux_navtui_1
 - Linux support: stable target
 - Windows support: experimental target
 
+## Known Performance Behavior
+
+After a hard refresh (or any cold cache state), the first load of each tab
+(`Artists`, `Albums`, `Songs`) can be noticeably slow while data is fetched and cached.
+Subsequent visits are much faster once the cache is warm.
+
 ## Upgrade Note
 
 If you used earlier `subsonic-tui` builds, you can move to `navtui` directly. Existing credentials/config/cache should continue to work through compatibility fallbacks.

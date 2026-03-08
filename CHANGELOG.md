@@ -9,6 +9,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 ### Added
 
 - Dedicated AI disclosure docs: `AI_TRANSPARENCY.MD` and `RELEASE_NOTES_v1.0.0-rc1.MD`.
+- Local install helper script (`scripts/install_local.sh`) so the app can be launched directly as `navtui`.
 - Full keybinding customization via `config.toml` `[keybinds]`.
 - Config option `show_identity_label` to toggle `username@server-host` display.
 - Queue-pane identity label placement at bottom-left.
@@ -39,6 +40,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - Release checklist now includes `cargo build --release --locked` and updated hard-refresh smoke key (`r`).
 - Release profile tuned for slimmer/faster production binaries (`thin` LTO, single codegen unit, stripped symbols, aborting panics).
 - CI now validates a Linux release build (`cargo build --release --locked`) in addition to check/test gates.
+- README and release checklist now treat `navtui` as the primary run command (`cargo run` as development fallback).
 
 ## [0.1.0] - 2026-03-04
 

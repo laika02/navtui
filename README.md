@@ -47,10 +47,11 @@ pactl --version
 cargo --version
 ```
 
-## Run
+## Install and Run
 
 ```bash
-cargo run
+./scripts/install_local.sh
+navtui
 ```
 
 First run prompts for:
@@ -60,6 +61,12 @@ First run prompts for:
 3. Password
 
 On later runs, server + username come from config, and password is read from keyring.
+
+Development fallback (without install):
+
+```bash
+cargo run
+```
 
 ## Data and Secrets
 
