@@ -50,7 +50,7 @@ jobs:
       - name: Install Packaging Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full mingw-w64
+          sudo apt-get install -y p7zip-full mingw-w64 pkg-config libdbus-1-dev
 
       - name: Build Release Archives
         run: ./scripts/package_release.sh "${{ steps.meta.outputs.release_tag }}"

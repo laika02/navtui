@@ -46,6 +46,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - README now documents no-Rust usage via prebuilt GitHub Release binaries.
 - Release workflow now installs MinGW on GitHub runners so Windows release artifacts can be built and attached.
 - Release workflow now supports manual `workflow_dispatch` with explicit tag input for recovery when tag-trigger runs are skipped.
+- CI/release workflows now install `pkg-config` and `libdbus-1-dev` on Ubuntu runners so `libdbus-sys` builds reliably.
 
 ## [0.1.0] - 2026-03-04
 
