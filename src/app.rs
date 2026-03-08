@@ -1061,7 +1061,7 @@ impl App {
         self.input_mode = InputMode::Search {
             buffer: existing.clone(),
         };
-        self.status = format!("Search /{existing} (live, Esc clear/back, Shift+Esc reset)");
+        self.status = format!("Search /{existing} (live, Esc clear/back, Ctrl+Esc reset)");
     }
 
     fn on_search_key(&mut self, key: KeyEvent) {

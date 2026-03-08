@@ -72,7 +72,7 @@ Playback and queue:
   - In Queue Focus mode: selected queue song is moved to play next
 - `c`: clear queue and stop playback
 - `r`: hard refresh library from server (clear disk caches first) and reset browser state
-- `Shift+Esc`: global reset to main Artists tab (clears search + filters/scopes)
+- `Ctrl+Esc`: global reset to main Artists tab (clears search + filters/scopes)
 - `Esc`: clear search/filter first; if already clear, acts as back
 - `,`: queue back
 - `.`: queue forward

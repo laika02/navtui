@@ -41,6 +41,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - Release profile tuned for slimmer/faster production binaries (`thin` LTO, single codegen unit, stripped symbols, aborting panics).
 - CI now validates a Linux release build (`cargo build --release --locked`) in addition to check/test gates.
 - README and release checklist now treat `navtui` as the primary run command (`cargo run` as development fallback).
+- Default global reset key changed from `Shift+Esc` to `Ctrl+Esc`.
 
 ## [0.1.0] - 2026-03-04
 

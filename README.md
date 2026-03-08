@@ -128,7 +128,7 @@ Global:
 - `n`: play selected item next (artist/album/song by active tab; selected queue song in Queue Focus mode)
 - `c`: clear queue and stop playback
 - `r`: hard refresh library (clears on-disk library/DNS cache first), resets browser state, and rewrites snapshot
-- `Shift+Esc`: global reset to main Artists tab (clears search/filters/scopes)
+- `Ctrl+Esc`: global reset to main Artists tab (clears search/filters/scopes)
 - `Esc`: clear search/filter first; if already clear, acts as back
 - `,` / `.`: queue back / queue forward
 
@@ -175,7 +175,7 @@ All keyboard actions are configurable in `config.toml` under `[keybinds]`.
 - Key spec formats:
   - Single chars: `"q"`, `"/"`, `","`, `"."`, `"["`, `"]"`, `"A"`
   - Named keys: `"tab"`, `"backtab"`, `"enter"`, `"esc"`, `"backspace"`, `"up"`, `"down"`, `"left"`, `"right"`, `"space"`
-  - Modifiers: `"shift+esc"`, `"ctrl+q"`, `"alt+enter"`
+  - Modifiers: `"ctrl+esc"`, `"ctrl+q"`, `"alt+enter"`
   - Standalone modifier-key event: `"shift"` (useful for queue mode toggle)
 
 Default keybind table:
@@ -185,7 +185,7 @@ Default keybind table:
 queue_mode_toggle = ["shift", "backtab"]
 quit = ["q"]
 escape = ["esc"]
-global_reset = ["shift+esc"]
+global_reset = ["ctrl+esc"]
 volume_down = ["["]
 volume_up = ["]"]
 seek_back = [";"]

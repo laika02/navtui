@@ -138,7 +138,7 @@ fn default_keybind_escape() -> Vec<String> {
 }
 
 fn default_keybind_global_reset() -> Vec<String> {
-    keybind_vec(&["shift+esc"])
+    keybind_vec(&["ctrl+esc"])
 }
 
 fn default_keybind_volume_down() -> Vec<String> {

@@ -102,7 +102,7 @@ Priorities:
   - Starts with `/`
   - Filters live, case-insensitive
   - `Esc` clears search/filter first; if already clear, it navigates back
-  - `Shift+Esc` is the global reset to main Artists tab and clears filters/scopes
+  - `Ctrl+Esc` is the global reset to main Artists tab and clears filters/scopes
   - `Tab` cancels search before switching tabs
   - `1/2/3` are text input while in search mode
   - If current tab has an active filter, `Backspace` keeps editing it even outside explicit search mode
