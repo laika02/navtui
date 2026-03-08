@@ -44,6 +44,8 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - README and release checklist now treat `navtui` as the primary run command (`cargo run` as development fallback).
 - Default global reset key changed from `Shift+Esc` to `Ctrl+Esc`.
 - README now documents no-Rust usage via prebuilt GitHub Release binaries.
+- Release workflow now installs MinGW on GitHub runners so Windows release artifacts can be built and attached.
+- Release workflow now supports manual `workflow_dispatch` with explicit tag input for recovery when tag-trigger runs are skipped.
 
 ## [0.1.0] - 2026-03-04
 

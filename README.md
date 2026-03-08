@@ -84,6 +84,7 @@ You can run `navtui` without installing the Rust toolchain by using GitHub Relea
 Notes:
 
 - Release archives are built automatically in CI for every pushed `v*` tag.
+- If a tag push does not trigger properly, run the `Release` workflow manually in GitHub Actions and provide the tag (for example `v1.0.0-rc4`).
 - `ffplay` must still be available (bundled in some Linux archives if detected during packaging; otherwise install it on your system `PATH`).
 
 ## Data and Secrets

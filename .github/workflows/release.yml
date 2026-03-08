@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (for example v1.0.0-rc4)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,8 +18,29 @@ jobs:
   package-and-publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Resolve Release Tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TAG_INPUT="${{ inputs.tag }}"
+            if [[ ! "$TAG_INPUT" =~ ^v.+$ ]]; then
+              echo "error: tag must start with 'v' (got: $TAG_INPUT)" >&2
+              exit 1
+            fi
+            echo "release_tag=$TAG_INPUT" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout (Tag Push)
+        if: github.event_name == 'push'
         uses: actions/checkout@v4
+
+      - name: Checkout (Manual Dispatch Tag)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.meta.outputs.release_tag }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -23,19 +50,19 @@ jobs:
       - name: Install Packaging Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full
+          sudo apt-get install -y p7zip-full mingw-w64
 
       - name: Build Release Archives
-        run: ./scripts/package_release.sh "${GITHUB_REF_NAME}"
+        run: ./scripts/package_release.sh "${{ steps.meta.outputs.release_tag }}"
 
       - name: Prepare Release Notes
         run: |
-          NOTES_FILE="RELEASE_NOTES_${GITHUB_REF_NAME}.MD"
+          NOTES_FILE="RELEASE_NOTES_${{ steps.meta.outputs.release_tag }}.MD"
           if [[ -f "$NOTES_FILE" ]]; then
             cp "$NOTES_FILE" /tmp/release_notes.md
           else
             cat > /tmp/release_notes.md <<EOF
-# navtui ${GITHUB_REF_NAME}
+# navtui ${{ steps.meta.outputs.release_tag }}
 
 Automated release build from CI.
 
@@ -47,17 +74,17 @@ EOF
       - name: Upload CI Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: navtui-${{ github.ref_name }}
-          path: dist/releases/${{ github.ref_name }}/*
+          name: navtui-${{ steps.meta.outputs.release_tag }}
+          path: dist/releases/${{ steps.meta.outputs.release_tag }}/*
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.meta.outputs.release_tag }}
           body_path: /tmp/release_notes.md
           files: |
-            dist/releases/${{ github.ref_name }}/linux_navtui_*.7z
-            dist/releases/${{ github.ref_name }}/windows_navtui_*.7z
-            dist/releases/${{ github.ref_name }}/SHA256SUMS
+            dist/releases/${{ steps.meta.outputs.release_tag }}/linux_navtui_*.7z
+            dist/releases/${{ steps.meta.outputs.release_tag }}/windows_navtui_*.7z
+            dist/releases/${{ steps.meta.outputs.release_tag }}/SHA256SUMS
           fail_on_unmatched_files: true
-          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          prerelease: ${{ contains(steps.meta.outputs.release_tag, '-rc') }}
