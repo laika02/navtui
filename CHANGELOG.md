@@ -10,6 +10,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 
 - Dedicated AI disclosure docs: `AI_TRANSPARENCY.MD` and `RELEASE_NOTES_v1.0.0-rc1.MD`.
 - Local install helper script (`scripts/install_local.sh`) so the app can be launched directly as `navtui`.
+- GitHub tag-triggered release workflow (`.github/workflows/release.yml`) that builds and publishes prebuilt Linux/Windows archives.
 - Full keybinding customization via `config.toml` `[keybinds]`.
 - Config option `show_identity_label` to toggle `username@server-host` display.
 - Queue-pane identity label placement at bottom-left.
@@ -42,6 +43,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - CI now validates a Linux release build (`cargo build --release --locked`) in addition to check/test gates.
 - README and release checklist now treat `navtui` as the primary run command (`cargo run` as development fallback).
 - Default global reset key changed from `Shift+Esc` to `Ctrl+Esc`.
+- README now documents no-Rust usage via prebuilt GitHub Release binaries.
 
 ## [0.1.0] - 2026-03-04
 

@@ -68,6 +68,24 @@ Development fallback (without install):
 cargo run
 ```
 
+## Prebuilt Binaries (No Rust Required)
+
+You can run `navtui` without installing the Rust toolchain by using GitHub Release assets.
+
+1. Open the repository Releases page.
+2. Download the archive for your platform:
+   - `linux_navtui_X.Y.Z.7z`
+   - `windows_navtui_X.Y.Z.7z`
+3. Extract the archive.
+4. Run:
+   - Linux: `./navtui`
+   - Windows: `navtui.exe`
+
+Notes:
+
+- Release archives are built automatically in CI for every pushed `v*` tag.
+- `ffplay` must still be available (bundled in some Linux archives if detected during packaging; otherwise install it on your system `PATH`).
+
 ## Data and Secrets
 
 - Config file:

@@ -56,9 +56,13 @@ Use this checklist before cutting a release tag.
 - Create signed/annotated tag:
   - `git tag -a vX.Y.Z -m "navtui vX.Y.Z"`
 - Push branch + tag.
+- Confirm GitHub Release workflow succeeds and attaches:
+  - `linux_navtui_X.Y.Z.7z`
+  - `windows_navtui_X.Y.Z.7z` (unless intentionally skipped)
+  - `SHA256SUMS`
 - Publish release notes from `CHANGELOG.md`.
 - Include explicit generative-AI disclosure in release notes (`AI_TRANSPARENCY.MD` + release notes file).
-- Attach archives and `SHA256SUMS` to the release.
+- If workflow publishing is disabled or fails, attach archives and `SHA256SUMS` manually.
 
 ## 7. Post-Release
 

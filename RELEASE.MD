@@ -34,6 +34,7 @@ Completed:
 - Configurable keybinds
 - Packaging script (`scripts/package_release.sh`)
 - CI (fmt/check/test/windows target check + Linux release build)
+- Tag-based GitHub Release automation that builds and publishes prebuilt Linux/Windows archives
 - App-level regression tests for queue wrap/reorder cancel, search hotkey behavior, and track-end retry/advance decision logic
 
 Known caveat to disclose in release notes:
@@ -59,6 +60,8 @@ Remaining before final `v1.0.0`:
 6. Fix blockers only.
 7. Repeat quality gates.
 8. Tag and publish `v1.0.0`.
+
+Note: pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and publishes prebuilt binaries for users without a Rust toolchain.
 
 ## Non-Goals for v1.0
 
