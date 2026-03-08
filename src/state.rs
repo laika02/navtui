@@ -10,7 +10,7 @@ pub enum Tab {
 }
 
 impl Tab {
-    fn next(self) -> Self {
+    pub fn next(self) -> Self {
         match self {
             Self::Artists => Self::Albums,
             Self::Albums => Self::Songs,
@@ -43,7 +43,6 @@ struct Snapshot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    Tab,
     Up,
     Down,
     RightOrEnter,
@@ -154,6 +153,14 @@ impl BrowserState {
         }
     }
 
+    pub fn is_album_scope_all(&self) -> bool {
+        matches!(self.album_scope, AlbumScope::All)
+    }
+
+    pub fn is_song_scope_all(&self) -> bool {
+        matches!(self.song_scope, SongScope::All)
+    }
+
     pub fn set_filter_for_active_tab(
         &mut self,
         query: String,
@@ -186,6 +193,32 @@ impl BrowserState {
         Ok(())
     }
 
+    pub fn set_filter_for_active_tab_loaded(&mut self, query: String, cache: &LibraryCache) {
+        match self.active_tab {
+            Tab::Artists => {
+                if self.artist_filter == query {
+                    return;
+                }
+                self.artist_filter = query;
+                self.apply_artist_filter();
+            }
+            Tab::Albums => {
+                if self.album_filter == query {
+                    return;
+                }
+                self.album_filter = query;
+                self.reload_albums_loaded(cache);
+            }
+            Tab::Songs => {
+                if self.song_filter == query {
+                    return;
+                }
+                self.song_filter = query;
+                self.reload_songs_loaded(cache);
+            }
+        }
+    }
+
     pub fn go_to_tab(
         &mut self,
         target: Tab,
@@ -195,6 +228,14 @@ impl BrowserState {
         self.set_tab_and_reset(target, cache, client)
     }
 
+    pub fn go_to_tab_loaded(&mut self, target: Tab, cache: &LibraryCache) {
+        self.set_tab_and_reset_loaded(target, cache);
+    }
+
+    pub fn refresh_active_tab_loaded(&mut self, cache: &LibraryCache) {
+        self.ensure_loaded_for_active_tab_loaded(cache);
+    }
+
     pub fn handle_action(
         &mut self,
         action: Action,
@@ -202,10 +243,6 @@ impl BrowserState {
         client: &SubsonicClient,
     ) -> Result<Outcome, ValidateError> {
         match action {
-            Action::Tab => {
-                self.set_tab_and_reset(self.active_tab.next(), cache, client)?;
-                Ok(Outcome::None)
-            }
             Action::Up => {
                 self.move_cursor_up();
                 Ok(Outcome::None)
@@ -305,6 +342,14 @@ impl BrowserState {
         }
     }
 
+    fn ensure_loaded_for_active_tab_loaded(&mut self, cache: &LibraryCache) {
+        match self.active_tab {
+            Tab::Artists => self.apply_artist_filter(),
+            Tab::Albums => self.reload_albums_loaded(cache),
+            Tab::Songs => self.reload_songs_loaded(cache),
+        }
+    }
+
     fn set_tab_and_reset(
         &mut self,
         target: Tab,
@@ -322,6 +367,20 @@ impl BrowserState {
         self.song_filter.clear();
         self.back_stack.clear();
         self.ensure_loaded_for_active_tab(cache, client)
+    }
+
+    fn set_tab_and_reset_loaded(&mut self, target: Tab, cache: &LibraryCache) {
+        self.active_tab = target;
+        self.album_scope = AlbumScope::All;
+        self.song_scope = SongScope::All;
+        self.artist_index = 0;
+        self.album_index = 0;
+        self.song_index = 0;
+        self.artist_filter.clear();
+        self.album_filter.clear();
+        self.song_filter.clear();
+        self.back_stack.clear();
+        self.ensure_loaded_for_active_tab_loaded(cache);
     }
 
     fn reload_albums(
@@ -354,6 +413,28 @@ impl BrowserState {
         self.songs_all = songs_all;
         self.apply_song_filter();
         Ok(())
+    }
+
+    fn reload_albums_loaded(&mut self, cache: &LibraryCache) {
+        self.albums_all = match &self.album_scope {
+            AlbumScope::All => cache.known_all_albums(),
+            AlbumScope::Artist(artist_id) => cache.known_albums_for_artist(artist_id),
+        };
+        self.apply_album_filter();
+    }
+
+    fn reload_songs_loaded(&mut self, cache: &LibraryCache) {
+        let mut songs_all = match &self.song_scope {
+            SongScope::All => cache.known_all_songs(),
+            SongScope::Album(album_id) => cache.known_songs_for_album(album_id),
+        };
+
+        if let AlbumScope::Artist(artist_id) = &self.album_scope {
+            songs_all.retain(|song| song.has_artist_id(artist_id));
+        }
+
+        self.songs_all = songs_all;
+        self.apply_song_filter();
     }
 
     fn apply_artist_filter(&mut self) {

@@ -1,4 +1,7 @@
+use std::collections::HashSet;
 use std::io;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -24,7 +27,7 @@ use ratatui::{Frame, Terminal};
 use crate::cache as disk_cache;
 use crate::config::KeybindsConfig;
 use crate::library::LibraryCache;
-use crate::model::Song;
+use crate::model::{Album, Song};
 use crate::playback::PlaybackEngine;
 use crate::state::{Action, BrowserState, Outcome, Tab};
 use crate::subsonic::SubsonicClient;
@@ -103,6 +106,7 @@ struct App {
     queue_visible_rows: usize,
     queue_follow_index: Option<usize>,
     interaction_mode: InteractionMode,
+    library_warmup: Option<LibraryWarmupWorker>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +132,27 @@ enum InteractionMode {
 struct QueueReorderSnapshot {
     queue: Vec<Song>,
     original_index: usize,
+}
+
+struct LibraryWarmupWorker {
+    rx: Receiver<LibraryWarmupEvent>,
+}
+
+enum LibraryWarmupEvent {
+    ArtistAlbums {
+        artist_id: String,
+        albums: Vec<Album>,
+        done: usize,
+        total: usize,
+    },
+    AlbumSongs {
+        album_id: String,
+        songs: Vec<Song>,
+        done: usize,
+        total: usize,
+    },
+    Done,
+    Failed(String),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -395,7 +420,7 @@ impl App {
         let user_server_label = user_server_label(&client);
         let keybinds =
             KeyBindings::from_config(&keybinds_cfg).context("failed to parse keybinds config")?;
-        Ok(Self {
+        let mut app = Self {
             client,
             user_server_label,
             show_identity_label,
@@ -424,7 +449,10 @@ impl App {
             queue_visible_rows: 0,
             queue_follow_index: None,
             interaction_mode: InteractionMode::Browser,
-        })
+            library_warmup: None,
+        };
+        app.start_background_library_warmup("startup");
+        Ok(app)
     }
 
     fn into_cache(self) -> LibraryCache {
@@ -436,6 +464,7 @@ impl App {
             if let Some(exit_status) = self.player.poll_finished()? {
                 self.advance_after_track_end(exit_status);
             }
+            self.poll_background_library_warmup();
             self.sync_reported_volume();
             terminal.draw(|frame| self.draw(frame))?;
 
@@ -457,6 +486,106 @@ impl App {
     fn sync_reported_volume(&mut self) {
         if let Some(applied) = self.player.take_reported_volume_update() {
             self.volume_percent = applied.clamp(0, 100);
+        }
+    }
+
+    fn start_background_library_warmup(&mut self, reason: &str) {
+        if self.cache.has_all_songs_loaded() {
+            self.library_warmup = None;
+            return;
+        }
+
+        let loaded_artist_ids = self.cache.loaded_artist_ids();
+        let loaded_album_ids = self.cache.loaded_album_ids();
+        let artist_ids: Vec<String> = self
+            .cache
+            .artists()
+            .iter()
+            .map(|artist| artist.id.clone())
+            .collect();
+
+        let (tx, rx) = mpsc::channel();
+        let client = self.client.clone();
+        thread::spawn(move || {
+            warm_library_in_background(client, artist_ids, loaded_artist_ids, loaded_album_ids, tx);
+        });
+        self.library_warmup = Some(LibraryWarmupWorker { rx });
+
+        if self.status.is_empty() {
+            self.status = format!("Library warmup started ({reason})");
+        } else {
+            self.status = format!("{} | warming cache in background", self.status);
+        }
+    }
+
+    fn poll_background_library_warmup(&mut self) {
+        loop {
+            let message = {
+                let Some(worker) = self.library_warmup.as_ref() else {
+                    return;
+                };
+                match worker.rx.try_recv() {
+                    Ok(message) => Some(message),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => {
+                        self.library_warmup = None;
+                        if self.status.contains("warming cache in background") {
+                            self.status = "Library warmup stopped".to_string();
+                        }
+                        return;
+                    }
+                }
+            };
+
+            let Some(message) = message else {
+                return;
+            };
+            match message {
+                LibraryWarmupEvent::ArtistAlbums {
+                    artist_id,
+                    albums,
+                    done,
+                    total,
+                } => {
+                    self.cache.upsert_albums_for_artist(artist_id, albums);
+                    if matches!(self.browser.active_tab(), Tab::Albums | Tab::Songs)
+                        && (done == total || done % 8 == 0)
+                    {
+                        self.browser.refresh_active_tab_loaded(&self.cache);
+                    }
+                }
+                LibraryWarmupEvent::AlbumSongs {
+                    album_id,
+                    songs,
+                    done,
+                    total,
+                } => {
+                    self.cache.upsert_songs_for_album(album_id, songs);
+                    if self.browser.active_tab() == Tab::Songs && (done == total || done % 8 == 0) {
+                        self.browser.refresh_active_tab_loaded(&self.cache);
+                    }
+                }
+                LibraryWarmupEvent::Done => {
+                    self.library_warmup = None;
+                    self.browser.refresh_active_tab_loaded(&self.cache);
+                    if self.status.contains("warming cache in background") {
+                        self.status = "Library warmup complete".to_string();
+                    }
+                    if let Err(err) = disk_cache::save_library_snapshot(
+                        self.client.server_url(),
+                        self.client.username(),
+                        &self.cache.snapshot(),
+                    ) {
+                        self.status = format!("Library warmup complete; cache save warning: {err}");
+                    }
+                    return;
+                }
+                LibraryWarmupEvent::Failed(err) => {
+                    self.library_warmup = None;
+                    self.status = format!("Library warmup failed: {err}");
+                    return;
+                }
+            }
         }
     }
 
@@ -533,7 +662,7 @@ impl App {
             return;
         }
         if self.keybinds.tab_cycle.matches(key) {
-            self.handle_nav(Action::Tab);
+            self.cycle_tab();
             return;
         }
         if self.keybinds.nav_up.matches(key) {
@@ -1129,18 +1258,48 @@ impl App {
             }
             SearchOp::CancelAndTab => {
                 self.input_mode = InputMode::Normal;
-                self.handle_nav(Action::Tab);
+                self.cycle_tab();
             }
         }
     }
 
+    fn cycle_tab(&mut self) {
+        let target = self.browser.active_tab().next();
+        self.switch_to_tab(target);
+    }
+
     fn switch_to_tab(&mut self, target: Tab) {
+        if self.should_use_cached_tab_switch(target) {
+            self.browser.go_to_tab_loaded(target, &self.cache);
+            let label = match target {
+                Tab::Artists => "artists",
+                Tab::Albums => "albums",
+                Tab::Songs => "songs",
+            };
+            self.status = format!(
+                "Library warmup in progress; showing cached {label} ({})",
+                self.browser.active_len()
+            );
+            return;
+        }
+
         match self
             .browser
             .go_to_tab(target, &mut self.cache, &self.client)
         {
             Ok(()) => {}
             Err(err) => self.status = format!("Navigation failed: {err}"),
+        }
+    }
+
+    fn should_use_cached_tab_switch(&self, target: Tab) -> bool {
+        if self.library_warmup.is_none() {
+            return false;
+        }
+        match target {
+            Tab::Artists => false,
+            Tab::Albums => !self.cache.has_all_albums_loaded(),
+            Tab::Songs => !self.cache.has_all_songs_loaded(),
         }
     }
 
@@ -1379,6 +1538,28 @@ impl App {
     }
 
     fn apply_filter_query(&mut self, query: String, live: bool) {
+        if self.should_use_cached_filter_path() {
+            self.browser
+                .set_filter_for_active_tab_loaded(query.clone(), &self.cache);
+            let total = self.browser.active_len();
+            if let InputMode::Search { .. } = &self.input_mode {
+                if total == 1 {
+                    self.status = format!("Search /{query} -> 1 match (auto-selected)");
+                } else {
+                    self.status = format!("Search /{query} -> {total} cached match(es)");
+                }
+            } else if self.browser.active_filter().is_empty() {
+                self.status = "Filter cleared".to_string();
+            } else if total == 1 {
+                self.status = "1 match (auto-selected)".to_string();
+            } else if live {
+                self.status = format!("Search /{query} -> {total} cached match(es)");
+            } else {
+                self.status = format!("Cached filter matches: {total}");
+            }
+            return;
+        }
+
         match self
             .browser
             .set_filter_for_active_tab(query.clone(), &mut self.cache, &self.client)
@@ -1404,6 +1585,17 @@ impl App {
             Err(err) => {
                 self.status = format!("Filter failed: {err}");
             }
+        }
+    }
+
+    fn should_use_cached_filter_path(&self) -> bool {
+        if self.library_warmup.is_none() {
+            return false;
+        }
+        match self.browser.active_tab() {
+            Tab::Artists => false,
+            Tab::Albums => self.browser.is_album_scope_all() && !self.cache.has_all_albums_loaded(),
+            Tab::Songs => self.browser.is_song_scope_all() && !self.cache.has_all_songs_loaded(),
         }
     }
 
@@ -1553,6 +1745,8 @@ impl App {
                 }
             }
         }
+
+        self.start_background_library_warmup("refresh");
     }
 
     fn enqueue_selected_item(&mut self) {
@@ -2331,6 +2525,76 @@ impl App {
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
         frame.render_stateful_widget(list, area, &mut list_state);
     }
+}
+
+fn warm_library_in_background(
+    client: SubsonicClient,
+    artist_ids: Vec<String>,
+    loaded_artist_ids: HashSet<String>,
+    loaded_album_ids: HashSet<String>,
+    tx: mpsc::Sender<LibraryWarmupEvent>,
+) {
+    let mut missing_artist_ids: Vec<String> = artist_ids
+        .into_iter()
+        .filter(|artist_id| !loaded_artist_ids.contains(artist_id))
+        .collect();
+    missing_artist_ids.sort_unstable();
+
+    let mut known_album_ids = loaded_album_ids.clone();
+    let artist_total = missing_artist_ids.len();
+    for (index, artist_id) in missing_artist_ids.into_iter().enumerate() {
+        let albums = match client.get_albums_by_artist(&artist_id) {
+            Ok(albums) => albums,
+            Err(err) => {
+                let _ = tx.send(LibraryWarmupEvent::Failed(err.to_string()));
+                return;
+            }
+        };
+        for album in &albums {
+            known_album_ids.insert(album.id.clone());
+        }
+        if tx
+            .send(LibraryWarmupEvent::ArtistAlbums {
+                artist_id,
+                albums,
+                done: index + 1,
+                total: artist_total,
+            })
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    let mut missing_album_ids: Vec<String> = known_album_ids
+        .into_iter()
+        .filter(|album_id| !loaded_album_ids.contains(album_id))
+        .collect();
+    missing_album_ids.sort_unstable();
+
+    let album_total = missing_album_ids.len();
+    for (index, album_id) in missing_album_ids.into_iter().enumerate() {
+        let songs = match client.get_songs_by_album(&album_id) {
+            Ok(songs) => songs,
+            Err(err) => {
+                let _ = tx.send(LibraryWarmupEvent::Failed(err.to_string()));
+                return;
+            }
+        };
+        if tx
+            .send(LibraryWarmupEvent::AlbumSongs {
+                album_id,
+                songs,
+                done: index + 1,
+                total: album_total,
+            })
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    let _ = tx.send(LibraryWarmupEvent::Done);
 }
 
 fn user_server_label(client: &SubsonicClient) -> String {
