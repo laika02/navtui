@@ -50,7 +50,27 @@ jobs:
       - name: Install Packaging Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full mingw-w64 pkg-config libdbus-1-dev
+          sudo apt-get install -y \
+            p7zip-full \
+            pkg-config \
+            libdbus-1-dev \
+            gcc-mingw-w64-x86-64 \
+            g++-mingw-w64-x86-64 \
+            binutils-mingw-w64-x86-64 \
+            nasm
+
+      - name: Configure Windows GNU Toolchain
+        run: |
+          echo "CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+          echo "CXX_x86_64_pc_windows_gnu=x86_64-w64-mingw32-g++" >> "$GITHUB_ENV"
+          echo "AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+
+      - name: Verify Windows GNU Toolchain
+        run: |
+          command -v x86_64-w64-mingw32-gcc
+          command -v x86_64-w64-mingw32-g++
+          command -v x86_64-w64-mingw32-ar
 
       - name: Build Release Archives
         run: ./scripts/package_release.sh "${{ steps.meta.outputs.release_tag }}"

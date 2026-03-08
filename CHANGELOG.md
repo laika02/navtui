@@ -48,6 +48,7 @@ The format is based on Keep a Changelog and this project follows SemVer.
 - Release workflow now installs MinGW on GitHub runners so Windows release artifacts can be built and attached.
 - Release workflow now supports manual `workflow_dispatch` with explicit tag input for recovery when tag-trigger runs are skipped.
 - CI/release workflows now install `pkg-config` and `libdbus-1-dev` on Ubuntu runners so `libdbus-sys` builds reliably.
+- CI/release workflows now install and pin explicit MinGW compiler/binutils packages and Windows GNU linker env vars to prevent `ring` cross-build failures.
 - Albums/songs full-cache fetch path now parallelizes Subsonic API fan-out requests for lower first-load latency.
 - During active background warmup, tab switching/filtering for global Albums/Songs uses cached data immediately to avoid long UI blocking.
 
