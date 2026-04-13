@@ -2,6 +2,7 @@ mod app;
 mod auth;
 mod cache;
 mod config;
+mod lastfm;
 mod library;
 mod model;
 mod playback;
@@ -42,6 +43,16 @@ fn run() -> anyhow::Result<()> {
         creds.config.expand_on_search_collapse,
         creds.config.show_identity_label,
         creds.config.keybinds.clone(),
+        creds
+            .config
+            .lastfm
+            .as_ref()
+            .filter(|cfg| cfg.enabled)
+            .and_then(|cfg| {
+                creds.lastfm_session_key.as_deref().and_then(|session_key| {
+                    lastfm::LastFmClient::new(&cfg.api_key, &cfg.api_secret, session_key).ok()
+                })
+            }),
     )?;
     if let Err(err) = cache::save_library_snapshot(
         &creds.config.server_url,

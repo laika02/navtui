@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::io;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use crossterm::event::{
@@ -26,6 +26,7 @@ use ratatui::{Frame, Terminal};
 
 use crate::cache as disk_cache;
 use crate::config::KeybindsConfig;
+use crate::lastfm::LastFmClient;
 use crate::library::LibraryCache;
 use crate::model::{Album, Song};
 use crate::playback::PlaybackEngine;
@@ -38,6 +39,7 @@ pub fn run(
     expand_on_search_collapse: bool,
     show_identity_label: bool,
     keybinds: KeybindsConfig,
+    lastfm: Option<LastFmClient>,
 ) -> Result<LibraryCache> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -59,6 +61,7 @@ pub fn run(
         expand_on_search_collapse,
         show_identity_label,
         keybinds,
+        lastfm,
     )
     .context("failed to initialize app state")?;
     let loop_result = app.run_loop(&mut terminal);
@@ -107,6 +110,22 @@ struct App {
     queue_follow_index: Option<usize>,
     interaction_mode: InteractionMode,
     library_warmup: Option<LibraryWarmupWorker>,
+    lastfm: Option<LastFmClient>,
+    active_scrobble: Option<ActiveScrobble>,
+    listening_position_seconds: f64,
+    listening_anchor_instant: Option<Instant>,
+}
+
+struct ActiveScrobble {
+    song: Song,
+    started_at_unix: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaybackStartKind {
+    NewTrack,
+    Seek,
+    RetryCurrent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,6 +433,7 @@ impl App {
         expand_on_search_collapse: bool,
         show_identity_label: bool,
         keybinds_cfg: KeybindsConfig,
+        lastfm: Option<LastFmClient>,
     ) -> Result<Self> {
         let artists = cache.artists().to_vec();
         let status = format!("Loaded {} artists", artists.len());
@@ -450,6 +470,10 @@ impl App {
             queue_follow_index: None,
             interaction_mode: InteractionMode::Browser,
             library_warmup: None,
+            lastfm,
+            active_scrobble: None,
+            listening_position_seconds: 0.0,
+            listening_anchor_instant: None,
         };
         app.start_background_library_warmup("startup");
         Ok(app)
@@ -1463,6 +1487,14 @@ impl App {
         elapsed.max(0.0)
     }
 
+    fn playback_listened_seconds(&self) -> f64 {
+        let mut elapsed = self.listening_position_seconds;
+        if let Some(anchor) = self.listening_anchor_instant {
+            elapsed += anchor.elapsed().as_secs_f64();
+        }
+        elapsed.max(0.0)
+    }
+
     fn reset_playback_clock(&mut self, seek_seconds: f64) {
         self.playback_position_seconds = seek_seconds.max(0.0);
         self.playback_anchor_instant = Some(Instant::now());
@@ -1472,17 +1504,26 @@ impl App {
         if let Some(anchor) = self.playback_anchor_instant.take() {
             self.playback_position_seconds += anchor.elapsed().as_secs_f64();
         }
+        if let Some(anchor) = self.listening_anchor_instant.take() {
+            self.listening_position_seconds += anchor.elapsed().as_secs_f64();
+        }
     }
 
     fn resume_playback_clock(&mut self) {
         if self.playback_anchor_instant.is_none() {
             self.playback_anchor_instant = Some(Instant::now());
         }
+        if self.listening_anchor_instant.is_none() {
+            self.listening_anchor_instant = Some(Instant::now());
+        }
     }
 
     fn stop_playback_clock(&mut self) {
         self.playback_position_seconds = 0.0;
         self.playback_anchor_instant = None;
+        self.listening_position_seconds = 0.0;
+        self.listening_anchor_instant = None;
+        self.active_scrobble = None;
     }
 
     fn seek_relative_seconds(&mut self, delta_seconds: f64) {
@@ -1660,6 +1701,7 @@ impl App {
     }
 
     fn clear_queue(&mut self) {
+        self.finish_current_track_scrobble();
         self.queue.clear();
         self.set_queue_index(None);
         self.stop_playback_clock();
@@ -1694,6 +1736,7 @@ impl App {
             }
         };
 
+        self.finish_current_track_scrobble();
         let stop_error = self.player.stop().err();
 
         self.queue.clear();
@@ -2149,41 +2192,114 @@ impl App {
     }
 
     fn play_song_direct(&mut self, song: &Song) -> Result<()> {
-        self.play_song_direct_with_seek(song, 0.0)
+        self.play_song_direct_with_seek(song, 0.0, PlaybackStartKind::NewTrack)
     }
 
     fn play_song_direct_seek(&mut self, song: &Song, seek_seconds: f64) -> Result<()> {
-        let target = self.client.stream_target(&song.id)?;
-        if let Err(_first_err) =
-            self.player
-                .play_target_seek(&target, self.volume_percent, seek_seconds)
-        {
-            // Retry once in case fast-start mode is not compatible for this track/server.
-            self.player
-                .play_target_compat_seek(&target, self.volume_percent, seek_seconds)?;
+        self.play_song_direct_with_seek(song, seek_seconds, PlaybackStartKind::Seek)
+    }
+
+    fn play_song_retry_current(&mut self, song: &Song) -> Result<()> {
+        self.play_song_direct_with_seek(song, 0.0, PlaybackStartKind::RetryCurrent)
+    }
+
+    fn play_song_direct_with_seek(
+        &mut self,
+        song: &Song,
+        seek_seconds: f64,
+        start_kind: PlaybackStartKind,
+    ) -> Result<()> {
+        if matches!(start_kind, PlaybackStartKind::NewTrack) {
+            self.finish_current_track_scrobble();
         }
+        let target = self.client.stream_target(&song.id)?;
+        let playback_result = match start_kind {
+            PlaybackStartKind::NewTrack | PlaybackStartKind::RetryCurrent => self
+                .player
+                .play_target(&target, self.volume_percent, seek_seconds)
+                .or_else(|_first_err| {
+                    // Retry once in case fast-start mode is not compatible for this track/server.
+                    self.player
+                        .play_target_compat(&target, self.volume_percent, seek_seconds)
+                }),
+            PlaybackStartKind::Seek => self
+                .player
+                .play_target_seek(&target, self.volume_percent, seek_seconds)
+                .or_else(|_first_err| {
+                    // Retry once in case fast-start mode is not compatible for this track/server.
+                    self.player
+                        .play_target_compat_seek(&target, self.volume_percent, seek_seconds)
+                }),
+        };
+        playback_result?;
         self.failed_retry_song_id = None;
         self.reset_playback_clock(seek_seconds);
+        match start_kind {
+            PlaybackStartKind::NewTrack => {
+                self.start_scrobble_tracking(song);
+                self.submit_now_playing(song);
+            }
+            PlaybackStartKind::RetryCurrent => {
+                self.listening_anchor_instant = Some(Instant::now());
+            }
+            PlaybackStartKind::Seek => {}
+        }
         Ok(())
     }
 
-    fn play_song_direct_with_seek(&mut self, song: &Song, seek_seconds: f64) -> Result<()> {
-        let target = self.client.stream_target(&song.id)?;
-        if let Err(_first_err) = self
-            .player
-            .play_target(&target, self.volume_percent, seek_seconds)
-        {
-            // Retry once in case fast-start mode is not compatible for this track/server.
-            self.player
-                .play_target_compat(&target, self.volume_percent, seek_seconds)?;
+    fn start_scrobble_tracking(&mut self, song: &Song) {
+        self.listening_position_seconds = 0.0;
+        self.listening_anchor_instant = Some(Instant::now());
+        self.active_scrobble = Some(ActiveScrobble {
+            song: song.clone(),
+            started_at_unix: current_unix_timestamp(),
+        });
+    }
+
+    fn submit_now_playing(&mut self, song: &Song) {
+        let Some(lastfm) = self.lastfm.clone() else {
+            return;
+        };
+
+        if let Err(err) = lastfm.update_now_playing(song) {
+            if err.is_auth_error() {
+                self.lastfm = None;
+                self.status = format!("{} | Last.fm disabled: {err}", self.status);
+            } else {
+                self.status = format!("{} | Last.fm now playing failed: {err}", self.status);
+            }
         }
-        self.failed_retry_song_id = None;
-        self.reset_playback_clock(seek_seconds);
-        Ok(())
+    }
+
+    fn finish_current_track_scrobble(&mut self) {
+        let Some(active) = self.active_scrobble.take() else {
+            return;
+        };
+        if !should_scrobble(
+            active.song.duration_seconds,
+            self.playback_listened_seconds(),
+        ) {
+            return;
+        }
+
+        let Some(lastfm) = self.lastfm.clone() else {
+            return;
+        };
+        if let Err(err) = lastfm.scrobble(&active.song, active.started_at_unix) {
+            if err.is_auth_error() {
+                self.lastfm = None;
+                self.status = format!("{} | Last.fm disabled: {err}", self.status);
+            } else {
+                self.status = format!("{} | Last.fm scrobble failed: {err}", self.status);
+            }
+        }
     }
 
     fn advance_after_track_end(&mut self, exit_status: std::process::ExitStatus) {
         self.pause_playback_clock();
+        if exit_status.success() {
+            self.finish_current_track_scrobble();
+        }
         let action = decide_track_end_action(
             exit_status.success(),
             self.queue_index,
@@ -2200,7 +2316,7 @@ impl App {
                     return;
                 };
                 self.failed_retry_song_id = Some(song.id.clone());
-                match self.play_song_direct(&song) {
+                match self.play_song_retry_current(&song) {
                     Ok(()) => {
                         self.status = format!(
                             "Retrying playback in compatibility mode: {} - {}",
@@ -2637,6 +2753,25 @@ fn format_timestamp(seconds: f64) -> String {
     }
 }
 
+fn current_unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn should_scrobble(duration_seconds: Option<u32>, listened_seconds: f64) -> bool {
+    let Some(duration_seconds) = duration_seconds else {
+        return false;
+    };
+    if duration_seconds < 30 {
+        return false;
+    }
+
+    let threshold = (duration_seconds as f64 / 2.0).min(240.0);
+    listened_seconds + 0.5 >= threshold
+}
+
 fn decide_track_end_action(
     successful_exit: bool,
     queue_index: Option<usize>,
@@ -2687,6 +2822,7 @@ mod tests {
             false,
             true,
             KeybindsConfig::default(),
+            None,
         )
         .expect("app should initialize")
     }
@@ -2792,5 +2928,18 @@ mod tests {
             decide_track_end_action(true, None, 2, None, None),
             TrackEndAction::None
         );
+    }
+
+    #[test]
+    fn scrobble_threshold_uses_half_duration_with_short_track_floor() {
+        assert!(!should_scrobble(Some(20), 20.0));
+        assert!(!should_scrobble(Some(180), 89.0));
+        assert!(should_scrobble(Some(180), 90.0));
+    }
+
+    #[test]
+    fn scrobble_threshold_caps_at_four_minutes() {
+        assert!(!should_scrobble(Some(900), 239.0));
+        assert!(should_scrobble(Some(900), 240.0));
     }
 }

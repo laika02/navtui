@@ -18,6 +18,7 @@ This project was created with substantial generative AI assistance.
 
 - Artists / Albums / Songs tabbed browser
 - Optional header identity label (`username@server-host`) in the bottom-left of the Queue pane
+- Optional Last.fm now-playing + scrobble submission
 - Drill-down navigation (artist -> albums -> songs)
 - Context-aware shuffle
 - Queue controls (enqueue, clear, back, forward)
@@ -63,6 +64,8 @@ First run prompts for:
 
 On later runs, server + username come from config, and password is read from keyring.
 
+If a `[lastfm]` section is present in `config.toml`, navtui will prompt once for your Last.fm password to create and store a session key in keyring.
+
 Development fallback (without install):
 
 ```bash
@@ -94,17 +97,20 @@ Notes:
   - Linux: `~/.config/navtui/config.toml`
   - Windows: `%APPDATA%\\navtui\\config.toml` (resolved via `dirs`)
   - Legacy fallback is supported from `subsonic-tui` paths if new paths are absent
-  - Stores only non-secret settings:
+  - Stores local settings:
     - `server_url`
     - `username`
     - `always_hard_refresh_on_launch` (default `false`)
     - `expand_on_search_collapse` (default `false`)
     - `show_identity_label` (default `true`)
+    - `lastfm` (optional Last.fm app settings, including API key/shared secret)
     - `keybinds` (optional overrides table; defaults shown below)
   - File mode is set to `0600` on Unix
 - Password storage: keyring service `navtui`
   - Legacy fallback reads `subsonic-tui` keyring service entries
   - Entry key format: `<username>@<md5(server_url)>`
+- Last.fm session storage: keyring service `navtui-lastfm`
+  - Entry key format: `<lastfm_username>@<md5(api_key)>`
 - Cache dir:
   - Linux: `~/.cache/navtui/`
   - Windows: `%LOCALAPPDATA%\\navtui\\`
@@ -121,11 +127,23 @@ always_hard_refresh_on_launch = false
 expand_on_search_collapse = false
 show_identity_label = true
 
+[lastfm]
+enabled = true
+api_key = "your_lastfm_api_key"
+api_secret = "your_lastfm_shared_secret"
+username = "your_lastfm_username"
+
 [keybinds]
 # Optional: only set keys you want to override.
 # Example:
 # quit = ["ctrl+q"]
 ```
+
+Last.fm notes:
+
+- `api_key` and `api_secret` come from your Last.fm API application and are stored in `config.toml`.
+- navtui stores the resulting Last.fm session key in keyring, not in `config.toml`.
+- Tracks are scrobbled after 50% playback or 4 minutes, whichever comes first, and only for tracks at least 30 seconds long.
 
 ## Default Keybindings
 
@@ -329,6 +347,7 @@ Project layout:
 
 - `src/main.rs`: bootstrap flow
 - `src/auth.rs`: prompt + keyring + login validation
+- `src/lastfm.rs`: Last.fm auth/session + scrobble API client
 - `src/subsonic.rs`: API client, mapping, DNS fallback
 - `src/library.rs`: lazy library cache
 - `src/cache.rs`: disk caches (DNS + snapshot)

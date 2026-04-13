@@ -19,11 +19,22 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub show_identity_label: bool,
     #[serde(default)]
+    pub lastfm: Option<LastFmConfig>,
+    #[serde(default)]
     pub keybinds: KeybindsConfig,
 }
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LastFmConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub api_key: String,
+    pub api_secret: String,
+    pub username: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -370,5 +381,38 @@ quit = ["ctrl+q"]
 
         assert_eq!(cfg.keybinds.quit, vec!["ctrl+q".to_string()]);
         assert_eq!(cfg.keybinds.tab_cycle, vec!["tab".to_string()]);
+    }
+
+    #[test]
+    fn lastfm_defaults_to_none_when_missing() {
+        let cfg: Config = toml::from_str(
+            r#"
+server_url = "https://music.example.com"
+username = "tester"
+"#,
+        )
+        .expect("config should parse");
+
+        assert!(cfg.lastfm.is_none());
+    }
+
+    #[test]
+    fn lastfm_enabled_defaults_to_true_when_section_present() {
+        let cfg: Config = toml::from_str(
+            r#"
+server_url = "https://music.example.com"
+username = "tester"
+
+[lastfm]
+api_key = "key"
+api_secret = "secret"
+username = "listener"
+"#,
+        )
+        .expect("config should parse");
+
+        let lastfm = cfg.lastfm.expect("lastfm config should exist");
+        assert!(lastfm.enabled);
+        assert_eq!(lastfm.username, "listener");
     }
 }

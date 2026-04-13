@@ -6,10 +6,12 @@ use dialoguer::{Input, Password};
 use keyring::{Entry, Error as KeyringError};
 
 use crate::config::{self, Config, KeybindsConfig};
+use crate::lastfm;
 use crate::subsonic::{self, ValidateError};
 
 const KEYRING_SERVICE: &str = "navtui";
 const LEGACY_KEYRING_SERVICE: &str = "subsonic-tui";
+const LASTFM_KEYRING_SERVICE: &str = "navtui-lastfm";
 #[cfg(target_os = "linux")]
 static KEYRING_BACKEND_INIT: Once = Once::new();
 
@@ -17,6 +19,7 @@ static KEYRING_BACKEND_INIT: Once = Once::new();
 pub struct Credentials {
     pub config: Config,
     pub password: String,
+    pub lastfm_session_key: Option<String>,
 }
 
 pub fn bootstrap() -> Result<Credentials> {
@@ -39,16 +42,19 @@ fn first_time_setup() -> Result<Credentials> {
         always_hard_refresh_on_launch: false,
         expand_on_search_collapse: false,
         show_identity_label: true,
+        lastfm: None,
         keybinds: KeybindsConfig::default(),
     };
 
     validate(&cfg, &password).map_err(map_validate_error)?;
     config::save(&cfg)?;
     set_password(&cfg, &password)?;
+    let lastfm_session_key = bootstrap_lastfm_session(&cfg)?;
 
     Ok(Credentials {
         config: cfg,
         password,
+        lastfm_session_key,
     })
 }
 
@@ -56,9 +62,11 @@ fn login_with_existing_config(cfg: Config) -> Result<Credentials> {
     if let Some(saved_password) = get_password(&cfg)? {
         match validate(&cfg, &saved_password) {
             Ok(()) => {
+                let lastfm_session_key = bootstrap_lastfm_session(&cfg)?;
                 return Ok(Credentials {
                     config: cfg,
                     password: saved_password,
+                    lastfm_session_key,
                 });
             }
             Err(ValidateError::InvalidCredentials) => {
@@ -73,10 +81,12 @@ fn login_with_existing_config(cfg: Config) -> Result<Credentials> {
     let password = prompt_password()?;
     validate(&cfg, &password).map_err(map_validate_error)?;
     set_password(&cfg, &password)?;
+    let lastfm_session_key = bootstrap_lastfm_session(&cfg)?;
 
     Ok(Credentials {
         config: cfg,
         password,
+        lastfm_session_key,
     })
 }
 
@@ -91,6 +101,48 @@ fn get_password(cfg: &Config) -> Result<Option<String>> {
     get_password_from_service(cfg, LEGACY_KEYRING_SERVICE)
 }
 
+fn bootstrap_lastfm_session(cfg: &Config) -> Result<Option<String>> {
+    let Some(lastfm_cfg) = cfg.lastfm.as_ref() else {
+        return Ok(None);
+    };
+    if !lastfm_cfg.enabled {
+        return Ok(None);
+    }
+
+    if let Some(session_key) = get_lastfm_session_key(lastfm_cfg)? {
+        return Ok(Some(session_key));
+    }
+
+    eprintln!(
+        "No saved Last.fm session found. Please enter your Last.fm password once to enable scrobbling."
+    );
+    let password = match prompt_lastfm_password() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("warning: Last.fm setup skipped: {err:#}");
+            return Ok(None);
+        }
+    };
+
+    match lastfm::create_mobile_session(
+        &lastfm_cfg.api_key,
+        &lastfm_cfg.api_secret,
+        &lastfm_cfg.username,
+        &password,
+    ) {
+        Ok(session_key) => {
+            set_lastfm_session_key(lastfm_cfg, &session_key)?;
+            Ok(Some(session_key))
+        }
+        Err(err) => {
+            eprintln!(
+                "warning: Last.fm authentication failed; scrobbling disabled for this run: {err}"
+            );
+            Ok(None)
+        }
+    }
+}
+
 fn set_password(cfg: &Config, password: &str) -> Result<()> {
     if password.is_empty() {
         bail!("password cannot be empty");
@@ -103,10 +155,37 @@ fn set_password(cfg: &Config, password: &str) -> Result<()> {
     Ok(())
 }
 
+fn get_lastfm_session_key(cfg: &config::LastFmConfig) -> Result<Option<String>> {
+    let entry = lastfm_entry(cfg)?;
+    match entry.get_password() {
+        Ok(session_key) => Ok(Some(session_key)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(err) => Err(err).context("failed to read Last.fm session from keyring"),
+    }
+}
+
+fn set_lastfm_session_key(cfg: &config::LastFmConfig, session_key: &str) -> Result<()> {
+    if session_key.is_empty() {
+        bail!("Last.fm session key cannot be empty");
+    }
+
+    let entry = lastfm_entry(cfg)?;
+    entry
+        .set_password(session_key)
+        .context("failed to store Last.fm session in keyring")?;
+    Ok(())
+}
+
 fn entry_for_service(cfg: &Config, service: &str) -> Result<Entry> {
     let server_hash = format!("{:x}", md5::compute(cfg.server_url.as_bytes()));
     let key = format!("{}@{}", cfg.username, server_hash);
     Entry::new(service, &key).context("failed to create keyring entry")
+}
+
+fn lastfm_entry(cfg: &config::LastFmConfig) -> Result<Entry> {
+    let api_hash = format!("{:x}", md5::compute(cfg.api_key.as_bytes()));
+    let key = format!("{}@{}", cfg.username, api_hash);
+    Entry::new(LASTFM_KEYRING_SERVICE, &key).context("failed to create Last.fm keyring entry")
 }
 
 fn get_password_from_service(cfg: &Config, service: &str) -> Result<Option<String>> {
@@ -158,6 +237,14 @@ fn prompt_password() -> Result<String> {
         .allow_empty_password(false)
         .interact()
         .context("failed to read password input")
+}
+
+fn prompt_lastfm_password() -> Result<String> {
+    Password::new()
+        .with_prompt("Last.fm password")
+        .allow_empty_password(false)
+        .interact()
+        .context("failed to read Last.fm password input")
 }
 
 fn normalize_server_url(raw: &str) -> String {
